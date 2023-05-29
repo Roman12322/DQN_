@@ -1,5 +1,4 @@
 import random
-import gym
 import numpy as np
 from collections import deque
 from keras.models import Sequential
@@ -13,7 +12,7 @@ class DQNAgent:
     def __init__(self, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=2000)
+        self.memory = deque(maxlen=3500)
         self.gamma = 0.99  # discount rate
         self.epsilon = 0.95  # exploration rate
         self.epsilon_min = 0.001
@@ -44,20 +43,19 @@ class DQNAgent:
     def replay(self, batch_size, time, portfolio, state_space, action_space):
           minibatch = random.sample(self.memory, batch_size)
           for state, action, reward, next_state in minibatch:
-              idx_state = np.argwhere(state_space==state)[0,0]
-              # idx_action = np.argwhere(action_space==action)[0,0]
+              idx_state = np.argwhere(state_space == state)[0, 0]
               target = (reward + self.gamma *
                         np.amax(self.model.predict(np.expand_dims(np.asarray(state), axis=0))[0]))
               target_f = self.model.predict(np.expand_dims(np.asarray(state), axis=0))
-              print(f"state: {state_space[idx_state]} | action: {action_space[action]} | reward: {reward} | portfolio: {portfolio} | time {time}")
-              print(f"before | target: {target} | target_f: {target_f}  | time: {time}")
+              # print(f"state: {state_space[idx_state]} | action: {action_space[action]} | reward: {reward} | time {time}")
+              # print(f"before | target: {target} | target_f: {target_f}  | time: {time}")
               target_f[0][action] = target
-              print(f"after | target: {target} | target_f: {target_f} | time: {time}")
+              # print(f"after | target: {target} | target_f: {target_f} | time: {time}")
               self.model.fit(np.expand_dims(np.asarray(state), axis=0), target_f, epochs=1, verbose=0)
 
     def update_epsilon(self):
         if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon
+            self.epsilon *= self.epsilon_decay
 
     def load(self, name):
         self.model.load_weights(name)
@@ -75,7 +73,7 @@ class Environment:
         self.state_size = len(state_space)
         self.q_table = np.ones([self.action_size, self.state_size]) * (-1000000)
         self.portfolio = 1000
-        self.rho = np.random.choice(a=self.state_space, p=self.probabilities, size=50, replace=True)
+        self.rho = np.random.choice(a=self.state_space, p=self.probabilities, size=250, replace=True)
 
     def reward_function(self, portfolio):
         if portfolio < 10 ** -17:
@@ -86,11 +84,7 @@ class Environment:
             return log(portfolio)
 
     def state_equation(self, portfolio, action, rho):
-        try:
-            value = portfolio * (1 + (action * rho))
-        except RuntimeWarning as e:
-            print(f"{portfolio = }, {action = }, {rho = }")
-            print(e)
+        value = portfolio * (1 + (action * rho))
         return value
 
     def get_next_action(self, q_table, state, action_space, epsilon, state_space):
@@ -98,55 +92,52 @@ class Environment:
             action = np.random.choice(action_space)
             return np.argwhere(action_space == action)[0, 0]
         else:
-          # print(f"state: {state} | state_idx = {np.argwhere(state_space==state)[0,0]}")
-          state_idx=np.argwhere(state_space==state)[0,0]
-          # print(f"return will be: {np.argmax(q_table[:, state_idx])}")
+          state_idx = np.argwhere(state_space == state)[0, 0]
           return np.argmax(q_table[:, state_idx])
 
 
     def step(self, action, state, time, epsilon, gamma, alpha):
         # расчет reward и наблюдение нового состояния и действия
         reward = self.reward_function(self.portfolio)
-
         # определение следуюищего state & action
         next_state = self.rho[time]
         next_action = self.get_next_action(q_table=self.q_table, state=state, action_space=self.action_space,
                                            epsilon=epsilon, state_space=self.state_space)
         # обновление q_values
         # print(f"action: {action} | state: {state} | next_state: {next_state}")
-        idx_state = np.argwhere(self.state_space==state)[0,0]
-        idx_next_state = np.argwhere(self.state_space==next_state)[0,0]
+        idx_state = np.argwhere(self.state_space == state)[0, 0]
+        idx_next_state = np.argwhere(self.state_space == next_state)[0, 0]
         self.q_table[action, idx_state] = self.q_table[action, idx_state] * (1 - alpha) + alpha * (
                     reward + (gamma * np.max(self.q_table[:, idx_next_state])))
         # обновление значения портфеля
-        self.portfolio = self.state_equation(portfolio=self.portfolio, action=self.action_space[next_action],
+        updated_portfolio = self.state_equation(portfolio=self.portfolio, action=self.action_space[next_action],
                                              rho=next_state)
+        print(f"time: {time} | portfolio: {self.portfolio} | next action: {action_space[next_action]} | state: {next_state} | updated portfolio: {updated_portfolio} | reward: {reward}")
+        self.portfolio = updated_portfolio
         state = next_state
         action = next_action
         return state, action, reward
 
-    def reset(self, portfolio):
+    def reset(self):
       portfolio = 1000
       return self.rho[0], portfolio
 
 if __name__ == "__main__":
-    e = np.linspace(start=0, stop=1, num=6)
-    probabilities = np.linspace(start=0.001, stop=0.05, num=len(e))
+    e = np.linspace(start=0, stop=1, num=11)
+    probabilities = np.linspace(start=0.1, stop=0.5, num=len(e))
     probabilities = probabilities / np.sum(probabilities)
     action_space = np.linspace(start=-1, stop=1, num=21)
     env = Environment(action_space=action_space, state_space=e, probabilities=probabilities)
     print(env.state_size, env.action_size)
-    EPISODES = 50
+    EPISODES = 250
     state_size = env.state_size
     action_size = env.action_size
     agent = DQNAgent(state_size, action_size)
     batch_size = 32
 
     for episode in range(EPISODES):
-        state, env.portfolio = env.reset(env.portfolio)
-        # state = np.reshape(state, [1, state_size])
-        for time in range(len(env.rho)):
-            # env.render()
+        state, env.portfolio = env.reset()
+        for time in range(1, len(env.rho)):
             action = agent.act(state)
             next_state, next_action, reward, = env.step(action=action, state=state, time=time,
                                                         epsilon=agent.epsilon, alpha=agent.learning_rate,
@@ -154,12 +145,10 @@ if __name__ == "__main__":
             # next_state = np.reshape(next_state, [1, state_size])
             agent.memorize(state, action, reward, next_state)
             state = next_state
-            # if done:
-            print("episode: {}/{} | score: {} | e: {:.2} | memory: {}"
-                  .format(episode, EPISODES, time, agent.epsilon, len(agent.memory)))
-            # break
             if len(agent.memory) > batch_size:
                 agent.replay(batch_size, time=time, portfolio=env.portfolio, state_space=env.state_space, action_space=env.action_space)
+        print("episode: {}/{} | score: {} | e: {:.2} | memory: {}"
+                  .format(episode, EPISODES-1, env.portfolio, agent.epsilon, len(agent.memory)))
         agent.update_epsilon()
 # class DQNAgent:
 #     def __init__(self, state_size, action_size):
